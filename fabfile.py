@@ -100,11 +100,34 @@ def setup_server():
     run('/etc/init.d/uwsgi restart')
 
 
+def restart_proj():
+    repo_info = get_repo_info()
+    
+    with settings(warn_only=True):
+        log('Restarting project serving', MSG_SUCCESS)
+        run('touch /etc/uwsgi/apps-enabled/{}.ini'.format(repo_info['name']))
+        run('service nginx reload')
+
+
+def enable_proj():
+    repo_info = get_repo_info()
+
+    log('Enabling project serving', MSG_SUCCESS)
+    run('ln -s -f {0}{1}/uwsgi.ini /etc/uwsgi/apps-enabled/{1}.ini'.format(
+        PROJECTS_ROOT, repo_info['name']))
+    run('ln -s -f {0}{1}/nginx.conf /etc/nginx/sites-available/{1}'.format(
+        PROJECTS_ROOT, repo_info['name']))
+    run('ln -s -f /etc/nginx/sites-available/{0} /etc/nginx/sites-enabled/{0}'.format(
+        repo_info['name']))
+    restart_proj()
+
+
 def init_project_deploy():
     '''
     Makes remote project initial setup
     init_project_deploy -H <hostname/IP> -u <user> (usually root)
     '''
+    copy_ssh_keys()
     with settings(warn_only=True):
         repo_info = get_repo_info()
 
@@ -121,7 +144,7 @@ def init_project_deploy():
                 run('chown {0}:{0} local_settings.py'.format(DEPLOY_USER))
                 #put('fixtures', '{0}{1}'.format(PROJECTS_ROOT, repo_info['name']))
                 #run('chown -R {0}:{0} fixtures'.format(DEPLOY_USER))
-                WORK_HOME = _sudo('echo $WORKON_HOME')
+                WORK_HOME = _sudo('echo $WORKON_HOME', DEPLOY_USER)
 
                 if run('test -d {0}/{1}'.format(WORK_HOME, repo_info['name'])).failed:
                     log('Creating virtualenv for project', MSG_SUCCESS)
@@ -129,15 +152,15 @@ def init_project_deploy():
 
                 with prefix('workon {}'.format(repo_info['name'])):
                     print(green('Installing required packets'))
-                    _sudo('pip install -r requirements.txt')
+                    _sudo('pip install -r requirements.txt', DEPLOY_USER)
 
                     print(green('Syncing DB'))
-                    _sudo('python manage.py syncdb --noinput --migrate')
+                    _sudo('python manage.py syncdb --noinput --migrate', DEPLOY_USER)
 
                     print(green('Migrating DB'))
-                    _sudo('python manage.py migrate --noinput')
+                    _sudo('python manage.py migrate --noinput', DEPLOY_USER)
 
                     print(green('Collecting static'))
-                    _sudo('python manage.py collectstatic --noinput')
+                    _sudo('python manage.py collectstatic --noinput', DEPLOY_USER)
 
     enable_proj()
