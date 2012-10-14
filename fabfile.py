@@ -2,22 +2,45 @@
 from fabric.api import *
 
 from flib import *
+from flib import _sudo
 
 
 '''
 Do not forget to add new functions into this list
 '''
-__all__ = ['setup_server']
+__all__ = ['setup_server', 'init_project_deploy']
 
 
 HOME_DIRECTORY = '/var/www'
+PROJECTS_ROOT = '{home}/projects/'.format(home=HOME_DIRECTORY)
+
+DEPLOY_USER = 'www-data'
 
 
 def home_rel(path):
     return '{home}/{path}'.format(home=HOME_DIRECTORY, path=path)
 
 
+def get_repo_info():
+    '''
+    Getting repository address, name, etc
+    '''
+    repo_info = {}
+    repo_info['ssh_url'] = local('git config --get remote.origin.url',
+        capture=True)
+    repo_info['git_url'] = 'git://{0}'.format(
+        repo_info['ssh_url'].split('@')[1].replace(':', '/'))
+    repo_info['name'] = local('basename {0} .git'.format(
+        repo_info['ssh_url']), capture=True)
+
+    return repo_info
+        
+
 def setup_server():
+    '''
+    Initial server setup proc
+    setup_server -H <hostname/IP> -u <user> (usually root)
+    '''
     log(format_header('Starting initial server setup'), MSG_SUCCESS)
     copy_ssh_keys()
 
@@ -75,3 +98,46 @@ def setup_server():
     user='root')
 
     run('/etc/init.d/uwsgi restart')
+
+
+def init_project_deploy():
+    '''
+    Makes remote project initial setup
+    init_project_deploy -H <hostname/IP> -u <user> (usually root)
+    '''
+    with settings(warn_only=True):
+        repo_info = get_repo_info()
+
+        with cd(PROJECTS_ROOT):
+            if run('test -d {0}'.format(repo_info['name'])).failed:
+                log('Cloning project\'s repo', MSG_INFO)
+                _sudo('git clone {0}'.format(repo_info['git_url']), DEPLOY_USER)
+
+            with cd(repo_info['name']):
+                log('Updating project\'s repo', MSG_SUCCESS)
+                _sudo('git reset --hard HEAD; git pull', DEPLOY_USER)
+                put('{0}/local_settings.py'.format(repo_info['name']),
+                    '{0}{1}'.format(PROJECTS_ROOT, repo_info['name']))
+                run('chown {0}:{0} local_settings.py'.format(DEPLOY_USER))
+                #put('fixtures', '{0}{1}'.format(PROJECTS_ROOT, repo_info['name']))
+                #run('chown -R {0}:{0} fixtures'.format(DEPLOY_USER))
+                WORK_HOME = _sudo('echo $WORKON_HOME')
+
+                if run('test -d {0}/{1}'.format(WORK_HOME, repo_info['name'])).failed:
+                    log('Creating virtualenv for project', MSG_SUCCESS)
+                    _sudo('mkvirtualenv {}'.format(repo_info['name']), DEPLOY_USER)
+
+                with prefix('workon {}'.format(repo_info['name'])):
+                    print(green('Installing required packets'))
+                    _sudo('pip install -r requirements.txt')
+
+                    print(green('Syncing DB'))
+                    _sudo('python manage.py syncdb --noinput --migrate')
+
+                    print(green('Migrating DB'))
+                    _sudo('python manage.py migrate --noinput')
+
+                    print(green('Collecting static'))
+                    _sudo('python manage.py collectstatic --noinput')
+
+    enable_proj()
