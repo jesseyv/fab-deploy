@@ -8,7 +8,10 @@ from flib import _sudo
 '''
 Do not forget to add new functions into this list
 '''
-__all__ = ['setup_server', 'init_project_deploy']
+__all__ = [
+    'setup_server', 'init_project_deploy',
+    'enable_proj', 'restart_proj'
+    ]
 
 
 HOME_DIRECTORY = '/var/www'
@@ -102,7 +105,7 @@ def setup_server():
 
 def restart_proj():
     repo_info = get_repo_info()
-    
+
     with settings(warn_only=True):
         log('Restarting project serving', MSG_SUCCESS)
         run('touch /etc/uwsgi/apps-enabled/{}.ini'.format(repo_info['name']))
@@ -120,6 +123,14 @@ def enable_proj():
     run('ln -s -f /etc/nginx/sites-available/{0} /etc/nginx/sites-enabled/{0}'.format(
         repo_info['name']))
     restart_proj()
+
+
+def disable_proj():
+    repo_info = get_repo_info()
+
+    log('Disabling project serving', MSG_SUCCESS)
+    run('rm /etc/uwsgi/apps-enabled/{0}.ini'.format(repo_info['name']))
+    run('rm /etc/nginx/sites-enabled/{0}'.format(repo_info['name']))
 
 
 def init_project_deploy():
